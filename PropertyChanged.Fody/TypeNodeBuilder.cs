@@ -2,20 +2,43 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using Fody;
 using Mono.Cecil;
 
 public partial class ModuleWeaver
 {
     List<TypeDefinition> allClasses;
+    Func<TypeDefinition, bool> filter;
     public List<TypeNode> Nodes;
     public List<TypeNode> NotifyNodes;
+
+    private bool IsWeavingAll()
+    {
+        var attrEle = Config.Attribute(XName.Get("defaultWeaving"));
+        if (attrEle == null)
+            return true;
+        return bool.Parse(attrEle.Value);
+    }
+
+    private Func<TypeDefinition, bool> GetFilter()
+    {
+        if (filter == null)
+        {
+            if (IsWeavingAll())
+                filter = t => !NamespaceFilters.Any() || NamespaceFilters.Any(filter => Regex.IsMatch(t.FullName, filter));
+            else
+            {
+                filter = t => (!NamespaceFilters.Any() || NamespaceFilters.Any(filter => Regex.IsMatch(t.FullName, filter))) && IsEnableWeaving(t);
+            }
+        }
+        return filter;
+    }
 
     public void BuildTypeNodes()
     {
         // setup a filter delegate to apply the namespace filters
-        Func<TypeDefinition, bool> extraFilter =
-            t => !NamespaceFilters.Any() || NamespaceFilters.Any(filter => Regex.IsMatch(t.FullName, filter));
+         var extraFilter = GetFilter();
 
         allClasses = ModuleDefinition
             .GetTypes()
@@ -91,13 +114,21 @@ public partial class ModuleWeaver
         }
         else
         {
+            var filter = GetFilter();
             var baseType = Resolve(typeDefinition.BaseType);
-            var parentNode = FindClassNode(baseType, Nodes);
-            if (parentNode == null)
+            if (filter(baseType))
             {
-                parentNode = AddClass(baseType);
+                var parentNode = FindClassNode(baseType, Nodes);
+                if (parentNode == null)
+                {
+                    parentNode = AddClass(baseType);
+                }
+                parentNode.Nodes.Add(typeNode);
             }
-            parentNode.Nodes.Add(typeNode);
+            else
+            {
+                Nodes.Add(typeNode);
+            }
         }
         return typeNode;
     }
@@ -117,5 +148,23 @@ public partial class ModuleWeaver
             }
         }
         return null;
+    }
+
+    private static bool IsEnableWeaving(TypeDefinition typeDefinition)
+    {
+        return HasNotifyPropertyChangedAttribute(typeDefinition, true) && !(HasDoNotNotifyAttribute(typeDefinition));
+    }
+
+    private static bool HasNotifyPropertyChangedAttribute(TypeDefinition typeDefinition, bool inherit = false)
+    {
+        if (inherit)
+            return typeDefinition.GetAllCustomAttributes().ContainsAttribute("PropertyChanged.AddINotifyPropertyChangedInterfaceAttribute");
+
+        return typeDefinition.CustomAttributes.ContainsAttribute("PropertyChanged.AddINotifyPropertyChangedInterfaceAttribute");
+    }
+
+    private static bool HasDoNotNotifyAttribute(TypeDefinition typeDefinition)
+    {
+        return typeDefinition.CustomAttributes.ContainsAttribute("PropertyChanged.DoNotNotifyAttribute");
     }
 }

@@ -16,7 +16,7 @@ public class OnChangedMethod
     public OnChangedTypes OnChangedType;
     public string ArgumentTypeFullName;
     public bool IsDefaultMethod;
-    public List<PropertyDefinition> Properties = new();
+    public List<PropertyDefinition> Properties = new List<PropertyDefinition>();
 }
 
 
